@@ -1,0 +1,16 @@
+#
+# Eclipse, pycharm, python, jupyter
+#
+
+.metadata/*
+.settings
+.cproject
+.project
+.idea
+.pyc
+__pycache__
+.ipynb_checkpoints
+
+#
+# Other
+#
