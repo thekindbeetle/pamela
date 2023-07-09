@@ -1,5 +1,5 @@
 import numpy as np
-import matplotlib.pyplot as pyplot
+import matplotlib.pyplot as plt
 import matplotlib.colors as colors
 from matplotlib.patches import Rectangle
 
@@ -94,7 +94,7 @@ class Calorimeter:
         :param plane38: закрасить 38-ю плоскость на изображении
         :param colormap: цветовая карта
         """
-        fig, axes = pyplot.subplots(nrows=1, ncols=2)
+        fig, axes = plt.subplots(nrows=1, ncols=2)
         for ax in axes.flat:
             ax.grid(True)
             ax.set_xticks(range(0, 96, 1), minor=True)
@@ -114,7 +114,7 @@ class Calorimeter:
         cbar_ax = fig.add_axes([0.85, 0.15, 0.01, 0.7])
         fig.colorbar(im, cax=cbar_ax)
         fig.set_size_inches((12, 5))
-        pyplot.show()
+        plt.show()
 
     def qtotpl(self, plnum):
         """

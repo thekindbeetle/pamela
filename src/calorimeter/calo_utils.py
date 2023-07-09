@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from src.util.coord_transform import polar2cartesian
+from util.coord_transform import polar2cartesian
 
 
 # Коэффициент горизонтального сжатия при подсчёте расстояний.

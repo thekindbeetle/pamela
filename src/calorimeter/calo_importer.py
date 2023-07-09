@@ -27,7 +27,7 @@ def import_data(fname, events=None):
     """
     Импорт данных по калориметру из mat-файла.
     :param: fname Путь к файлу
-    :param: events Диапазон событий
+    :param: events Номера событий
     """
     mat_data = scipy.io.loadmat(fname, variable_names=key_list)
     print('.mat file loaded')
@@ -42,8 +42,5 @@ def import_data(fname, events=None):
         else:
             data[idx] = np.zeros(mat_shape)
     if events is None:
-        start_event = 1
-        last_event = len(data[1])
-    else:
-        start_event, last_event = events[0], events[1]
-    return dict([(e, Calorimeter(parse_event(data, e - 1))) for e in range(start_event, last_event + 1)])
+        events = range(1, len(data[1]))
+    return dict([(e, Calorimeter(parse_event(data, e - 1))) for e in events])
