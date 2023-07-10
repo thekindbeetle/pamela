@@ -23,14 +23,14 @@ DIST_MATRIX = np.transpose([[np.sqrt(j + 1) for j in np.arange(0, 22, 1)] for i 
 # Константы
 ### - - - - - - - - - ###
 
-peak_threshold = 15.0  # peak_threshold - минимальное значение максимума
-peak_min_difference = np.pi / 18  # peak_min_difference - минимальное угловое расстояние между пиками
-inclination_weight_power = -1.8  # weight_power - показатель весовой функции
-inclination_weight_shift = 0.25  # weight_shift - смещение весовой функции
-star_weight_power = -0.3  # weight_power - показатель весовой функции
-star_weight_shift = 0.25  # weight_shift - смещение весовой функции
-default_sigma = 0.05  # default_sigma - ширина сглаживающей гауссианы
-max_peaks = 100  # max_peaks - максимальное количество порожденных частиц
+def_peak_threshold = 15.0  # peak_threshold - минимальное значение максимума
+def_peak_min_difference = np.pi / 18  # peak_min_difference - минимальное угловое расстояние между пиками
+def_inclination_weight_power = -1.8  # weight_power - показатель весовой функции
+def_inclination_weight_shift = 0.25  # weight_shift - смещение весовой функции
+def_star_weight_power = -0.3  # weight_power - показатель весовой функции
+def_star_weight_shift = 0.25  # weight_shift - смещение весовой функции
+def_default_sigma = 0.05  # default_sigma - ширина сглаживающей гауссианы
+def_max_peaks = 100  # max_peaks - максимальное количество порожденных частиц
 
 
 # Если трек проходит через клеточки, их надо удалить.
@@ -95,7 +95,7 @@ def _gaussian_sum_1d_weighted(val, centers, sigma, weights):
     return field
 
 
-def get_start_direction(img_x, img_y, weight_power=-1.8, shift=0.25,
+def get_start_direction(img_x, img_y, weight_power=-1.8, shift=0.25, num_directions=80,
                         plot_track=False, plot_title='', verbose=False):
     """
     Вычисляем направление влёта частицы в калориметр.
@@ -106,12 +106,13 @@ def get_start_direction(img_x, img_y, weight_power=-1.8, shift=0.25,
     :param plot_track: Показать картинку с треком
     :param plot_title: Заголовок для графика
     :param verbose: Включить текстовый вывод
+    :param num_directions: Количество различных углов (для преобразования Хафа)
     :return: X, Y, угол влёта, углы влёта в проекциях X, Y
     """
     vprint = print if verbose else lambda *a, **k: None
 
     # Диапазон допустимых питч-углов
-    pitch_theta = np.linspace(-max_image_angle, max_image_angle, 200, endpoint=False)
+    pitch_theta = np.linspace(-max_image_angle, max_image_angle, num_directions, endpoint=False)
 
     img_x = (img_x > 0).astype(np.float64) * np.power(DIST_MATRIX + shift, weight_power)
     img_y = (img_y > 0).astype(np.float64) * np.power(DIST_MATRIX + shift, weight_power)
@@ -449,10 +450,11 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
 
         (polar_rhoX, polar_phiX) = cartesian2polar(tmp_x - new_x, tmp_zx - new_z)
         (polar_rhoY, polar_phiY) = cartesian2polar(tmp_y - new_y, tmp_zy - new_z)
-        image_polarX = _gaussian_sum_1d_weighted(polar_angles_list, polar_phiX, default_sigma,
-                                                 np.power(polar_rhoX + weight_shift, weight_power))
-        image_polarY = _gaussian_sum_1d_weighted(polar_angles_list, polar_phiY, default_sigma,
-                                                 np.power(polar_rhoY + weight_shift, weight_power))
+        # image_polarX = _gaussian_sum_1d_weighted(polar_angles_list, polar_phiX, default_sigma,
+        #                                          np.power(polar_rhoX + weight_shift, weight_power))
+        # image_polarY = _gaussian_sum_1d_weighted(polar_angles_list, polar_phiY, default_sigma,
+        #                                          np.power(polar_rhoY + weight_shift, weight_power))
+
         polar_peaksX = scipy.signal.find_peaks(image_polarX, distance=peak_angle_difference)[0][:max_peaks]
         polar_peaksY = scipy.signal.find_peaks(image_polarY, distance=peak_angle_difference)[0][:max_peaks]
         polar_peaksX_values, polar_peaksY_values = image_polarX[polar_peaksX], image_polarY[polar_peaksY]
