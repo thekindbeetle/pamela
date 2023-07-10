@@ -440,26 +440,30 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
 
         vprint("Result peak index {0}".format(result_peak_idx))
 
-        new_x, new_y, new_z = interaction_points[
-            result_peak_idx]  # start_lineX[peak_z_idx], start_lineY[peak_z_idx], start_lineZ[peak_z_idx]
+        new_x, new_y, new_z = interaction_points[result_peak_idx]
+        # start_lineX[peak_z_idx], start_lineY[peak_z_idx], start_lineZ[peak_z_idx]
 
         tmp_x = x[((distX > radius_lower) | (zx > new_z)) & (distX < radius_upper)]
         tmp_y = y[((distY > radius_lower) | (zy > new_z)) & (distY < radius_upper)]
         tmp_zx = zx[((distX > radius_lower) | (zx > new_z)) & (distX < radius_upper)]
         tmp_zy = zy[((distY > radius_lower) | (zy > new_z)) & (distY < radius_upper)]
+        # tmp_x = x[((distX > radius_lower) | (zx > new_z))]
+        # tmp_y = y[((distY > radius_lower) | (zy > new_z))]
+        # tmp_zx = zx[((distX > radius_lower) | (zx > new_z))]
+        # tmp_zy = zy[((distY > radius_lower) | (zy > new_z))]
 
         (polar_rhoX, polar_phiX) = cartesian2polar(tmp_x - new_x, tmp_zx - new_z)
         (polar_rhoY, polar_phiY) = cartesian2polar(tmp_y - new_y, tmp_zy - new_z)
-        # image_polarX = _gaussian_sum_1d_weighted(polar_angles_list, polar_phiX, default_sigma,
-        #                                          np.power(polar_rhoX + weight_shift, weight_power))
-        # image_polarY = _gaussian_sum_1d_weighted(polar_angles_list, polar_phiY, default_sigma,
-        #                                          np.power(polar_rhoY + weight_shift, weight_power))
+        image_polarX = _gaussian_sum_1d_weighted(polar_angles_list, polar_phiX, default_sigma,
+                                                 np.power(polar_rhoX + weight_shift, weight_power))
+        image_polarY = _gaussian_sum_1d_weighted(polar_angles_list, polar_phiY, default_sigma,
+                                                 np.power(polar_rhoY + weight_shift, weight_power))
 
-        polar_peaksX = scipy.signal.find_peaks(image_polarX, distance=peak_angle_difference)[0][:max_peaks]
-        polar_peaksY = scipy.signal.find_peaks(image_polarY, distance=peak_angle_difference)[0][:max_peaks]
+        polar_peaksX = scipy.signal.find_peaks(image_polarX, distance=peak_angle_difference)[0]
+        polar_peaksY = scipy.signal.find_peaks(image_polarY, distance=peak_angle_difference)[0]
         polar_peaksX_values, polar_peaksY_values = image_polarX[polar_peaksX], image_polarY[polar_peaksY]
-        polar_peaksX = polar_peaksX[polar_peaksX_values >= peak_threshold]
-        polar_peaksY = polar_peaksY[polar_peaksY_values >= peak_threshold]
+        polar_peaksX = polar_peaksX[polar_peaksX_values >= peak_threshold][:max_peaks]
+        polar_peaksY = polar_peaksY[polar_peaksY_values >= peak_threshold][:max_peaks]
 
         if plot_result:
             fig, ax = plt.subplots(2, 1)
