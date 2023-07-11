@@ -1,5 +1,6 @@
 import numpy as np
-import scipy.io
+from scipy.io import loadmat
+from scipy.sparse import issparse
 
 from calorimeter.calorimeter import Calorimeter
 
@@ -14,33 +15,22 @@ key_list = ['U{0}'.format(str(idx)) for idx in planes]
 keys = dict(zip(planes, key_list))
 
 
-def parse_event(data, evnum):
-
-    ev = np.zeros((44, 96))
-    for plnum in planes:
-        for i in range(96):
-            ev[plnum - 1][i] = data[plnum][evnum][i]
-    return ev
-
-
-def import_data(fname, events=None):
+def import_data(fname, events=None, verbose=True):
     """
     Импорт данных по калориметру из mat-файла.
     :param: fname Путь к файлу
     :param: events Номера событий
     """
-    mat_data = scipy.io.loadmat(fname, variable_names=key_list)
-    print('.mat file loaded')
+    mat_data = loadmat(fname, variable_names=key_list)
+    if verbose:
+        print('.mat file loaded')
 
-    data = dict()
-    mat_shape = (0, 96)
+    size = mat_data['U1'].shape[0]
+    data = np.zeros((size, 44, 96))
     for idx in full_keys.keys():
         pl_data = mat_data.get(full_keys[idx])
-        if scipy.sparse.issparse(pl_data):
-            data[idx] = pl_data.toarray()
-            mat_shape = pl_data.shape
-        else:
-            data[idx] = np.zeros(mat_shape)
+        if issparse(pl_data):
+            data[:, idx - 1, :] = pl_data.toarray()
     if events is None:
         events = range(1, len(data[1]))
-    return dict([(e, Calorimeter(parse_event(data, e - 1))) for e in events])
+    return dict([(e, Calorimeter(data[e - 1, :, :])) for e in events])
