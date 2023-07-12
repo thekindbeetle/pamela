@@ -32,5 +32,5 @@ def import_data(fname, events=None, verbose=True):
         if issparse(pl_data):
             data[:, idx - 1, :] = pl_data.toarray()
     if events is None:
-        events = range(1, len(data[1]))
+        events = range(1, size + 1)
     return dict([(e, Calorimeter(data[e - 1, :, :])) for e in events])
