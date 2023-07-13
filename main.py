@@ -6,10 +6,25 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import scipy.io
+import scipy.ndimage
 import tqdm
 
+import sys
+sys.path.append(r'D:/repos/pamela/src')
 from calorimeter import calo_importer
 from calorimeter.find_apr_track import get_start_direction, get_star
+
+
+def _filter_img(img, kernel=[[0, 1, 0], [1, 0, 1], [0, 1, 0]]):
+    """
+    Применение фильтра к изображению.
+    Смысл такой: мы хотим убрать точки, у которых (в некотором смысле) много соседей.
+    """
+    img = (img > 0).astype(int)
+    img_conv_k = scipy.ndimage.convolve(img, kernel, mode='constant', cval=0.0)
+    img[img_conv_k > 2] = 0
+    return img
+
 
 disk = 'D'
 
@@ -55,15 +70,17 @@ tibarX = dict([(event_numbers[i], tibarX[i]) for i in range(len(event_numbers))]
 tibarY = dict([(event_numbers[i], tibarY[i]) for i in range(len(event_numbers))])
 
 rig_data = scipy.io.loadmat(os.path.join(dpath, trackerfile), variable_names=['Rig'])['Rig'].flatten()
+rig_data = rig_data[event_idx]
+
 siminfo_data = scipy.io.loadmat(os.path.join(dpath, siminfofile), variable_names=['caloplanepos', 'caloplaneint', 'fTHETA', 'fPHI'])
 calol2_data = scipy.io.loadmat(os.path.join(dpath, l2file), variable_names=['nstrip'])
 
-# Жесткость частицы
+# Жесткость частицы (триггерная переменная(
 rig = dict([(event_numbers[i], rig_data[i]) for i in range(len(event_numbers))])
 # Плоскость взаимодействия
 caloplaneint = dict([(event_numbers[i], siminfo_data['caloplaneint'][event_numbers[i] - 1][0]) for i in range(len(event_numbers))])
 # Количество сработавших стрипов
-nstrip = dict([(event_numbers[i], int(calol2_data['nstrip'][event_numbers[i] - 1])) for i in range(len(event_numbers))])
+nstrip = dict([(event_numbers[i], int(calol2_data['nstrip'][event_numbers[i] - 1][0])) for i in range(len(event_numbers))])
 
 # Зенитный (полярный) угол влета частицы
 ev_theta = dict([(event_numbers[i], siminfo_data['fTHETA'][event_numbers[i] - 1][0]) for i in range(len(event_numbers))])
@@ -72,7 +89,6 @@ print('Load completed.')
 
 
 for evnum in tqdm.tqdm(event_numbers):
-# for evnum in event_numbers:
     # print('Rig = {0}, nstrip = {1}, caloplaneint = {2}'.format(rig[evnum], nstrip[evnum], caloplaneint[evnum]))
 
     img_x = calo_events[evnum].x_projection()
@@ -87,9 +103,12 @@ for evnum in tqdm.tqdm(event_numbers):
     # print("Event {0}: ({1}, {2}) vs real ({3}, {4})".format(evnum, start_x + 1, start_y + 1,
     #                                                         start_pts[evnum][0], start_pts[evnum][1]))
 
-    get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
+    img_x_filtered = _filter_img(calo_events[evnum].x_projection())
+    img_y_filtered = _filter_img(calo_events[evnum].y_projection())
+
+    get_star(img_x_filtered, img_y_filtered, start_x, start_y, start_angle_x, start_angle_y,
              peak_threshold=8.0, peak_min_difference=np.pi / 12, weight_power=-0.3,
              weight_shift=0.25, default_sigma=0.05, max_peaks=100,
-             verbose=False, plot=False, plot_result=True, output_file=r'D:\output\apr1\2023-07-11\apr_{0}.png'.format(evnum))
+             verbose=False, plot=False, plot_result=True, output_file=None)
 
     plt.show()

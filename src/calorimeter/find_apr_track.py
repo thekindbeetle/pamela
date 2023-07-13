@@ -227,7 +227,7 @@ def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, 
     if len(peaks_info[0]) > 0:
         peaks_sorted = peaks_info[0][np.argsort(peaks_info[1]['peak_heights'])][::-1]
     else:
-        peaks_sorted = [21]
+        peaks_sorted = []
 
     if plot:
         fig, ax = plt.subplots(2, 1)
@@ -244,10 +244,10 @@ def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, 
 
 def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
              peak_threshold=0.0, peak_min_difference=np.pi / 18, weight_power=-0.5,
-             weight_shift=0.25, default_sigma=0.05, max_peaks=100,
+             weight_shift=0.25, default_sigma=0.05, max_peaks=100, search_max=True,
              verbose=False, plot=False, plot_result=False, output_file=None):
     """
-
+    Поиск "звезды" взаимодействия.
     :param img_x: проекция X калориметра
     :param img_y: проекция Y калориметра
     :param start_x: точка влёта в калориметр (координата X)
@@ -260,6 +260,7 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
     :param weight_shift: смещение весовой функции
     :param default_sigma: ширина сглаживающей гауссианы
     :param max_peaks: максимальное количество порожденных частиц
+    :param search_max: перебирать только максимумы энерговыделений вдоль трека (иначе проходим по всем точкам)
     :param verbose: включить текстовый вывод
     :param plot: нарисовать графики
     :param plot_result: вывести конечную звезду
@@ -303,17 +304,23 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
     # Проверяем только несколько пиков
     # - - - - - - - - - - - #
 
-    peaks_sorted = get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y)[0]
+    if search_max:
+        peaks_sorted = get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y)[0]
+    else:
+        peaks_sorted = range(22)
 
     vprint("Peaks positions: ", peaks_sorted)
 
     # Значение, определяющее выбор пика
-    # Сейчас это сумма количества направлений в проекциях
-    peaks_rate = np.zeros(len(peaks_sorted))
+    # Сейчас это сумма значений функции распределения в проекциях
+    if len(peaks_sorted) > 0:
+        peaks_rate = np.zeros(len(peaks_sorted))
 
-    interaction_points = dict([(i, []) for i in range(len(peaks_sorted))])
-    polar_angles_x = dict([(i, []) for i in range(len(peaks_sorted))])
-    polar_angles_y = dict([(i, []) for i in range(len(peaks_sorted))])
+        interaction_points = dict([(i, []) for i in range(len(peaks_sorted))])
+        polar_angles_x = dict([(i, []) for i in range(len(peaks_sorted))])
+        polar_angles_y = dict([(i, []) for i in range(len(peaks_sorted))])
+    else:
+        peaks_rate = [0]
 
     # Проходим пики в порядке убывания.
     for pk in range(len(peaks_sorted)):
@@ -494,6 +501,6 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
                 plt.savefig(output_file)
                 plt.close()
 
-        return interaction_points[result_peak_idx], \
+        return (new_x, new_y, peak_z_idx), \
             polar_angles_list[polar_angles_x[result_peak_idx]], \
             polar_angles_list[polar_angles_y[result_peak_idx]]
