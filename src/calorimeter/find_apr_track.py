@@ -5,16 +5,21 @@
 """
 
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib import colors
 import scipy.stats
 import scipy.signal
 import scipy.io
 
-from calorimeter.calo_utils import K, max_image_angle, get_angle_by_projections, plot_line_by_start_point_and_angle
+from calorimeter.calo_utils import K, max_image_angle, get_angle_by_projections, plot_line_by_start_point_and_angle,\
+    real_angle2image, image_angle2real
 
 from util.coord_transform import cartesian2polar
 from hough_transform.hough2d import hough_line
 from skimage.transform import hough_line_peaks
+
+matplotlib.use('QT5Agg')
 
 # Матрица расстояний, которая передаётся в преобразование Хафа
 DIST_MATRIX = np.transpose([[np.sqrt(j + 1) for j in np.arange(0, 22, 1)] for i in np.arange(0, 96, 1)])
@@ -95,12 +100,12 @@ def _gaussian_sum_1d_weighted(val, centers, sigma, weights):
     return field
 
 
-def get_start_direction(img_x, img_y, weight_power=-1.8, shift=0.25, num_directions=80,
+def get_start_direction(img_x_src, img_y_src, weight_power=-1.8, shift=0.25, num_directions=80,
                         plot_track=False, plot_title='', verbose=False):
     """
     Вычисляем направление влёта частицы в калориметр.
-    :param img_x: Проекция X
-    :param img_y: Проекция Y
+    :param img_x_src: Проекция X
+    :param img_y_src: Проекция Y
     :param weight_power: Весовой коэффициент в матрице преобразования Хафа
     :param shift: Сдвиг для весовой функции
     :param plot_track: Показать картинку с треком
@@ -114,8 +119,8 @@ def get_start_direction(img_x, img_y, weight_power=-1.8, shift=0.25, num_directi
     # Диапазон допустимых питч-углов
     pitch_theta = np.linspace(-max_image_angle, max_image_angle, num_directions, endpoint=False)
 
-    img_x = (img_x > 0).astype(np.float64) * np.power(DIST_MATRIX + shift, weight_power)
-    img_y = (img_y > 0).astype(np.float64) * np.power(DIST_MATRIX + shift, weight_power)
+    img_x = (img_x_src > 0).astype(np.float64) * np.power(DIST_MATRIX + shift, weight_power)
+    img_y = (img_y_src > 0).astype(np.float64) * np.power(DIST_MATRIX + shift, weight_power)
 
     hX, thetaX, dX = hough_line(img_x, theta=pitch_theta)
     hY, thetaY, dY = hough_line(img_y, theta=pitch_theta)
@@ -173,15 +178,26 @@ def get_start_direction(img_x, img_y, weight_power=-1.8, shift=0.25, num_directi
     if plot_track:
         fig, ax = plt.subplots(2, 1)
         fig.suptitle(plot_title)
-        ax[0].imshow(img_x > 0)
-        ax[0].axline((start_x, 0), slope=np.tan(theta_max_x + np.pi / 2), color='r')
-        ax[1].imshow(img_y > 0)
-        ax[1].axline((start_y, 0), slope=np.tan(theta_max_y + np.pi / 2), color='r')
+        fig.set_figwidth(12)
+        fig.set_figheight(5)
+
+        ax0 = ax[0].imshow(img_x_src, norm=colors.LogNorm(vmin=0.7, vmax=10.0), cmap='Greys')
+        ax[0].axline((start_x, 0), slope=np.tan(theta_max_x + np.pi / 2), color='r', lw=2)
+        # fig.colorbar(ax0, ax=ax[0], extend='max')
+
+        ax1 = ax[1].imshow(img_y_src, norm=colors.LogNorm(vmin=0.7, vmax=10.0), cmap='Greys')
+        ax[1].axline((start_y, 0), slope=np.tan(theta_max_y + np.pi / 2), color='r', lw=2)
+        # fig.colorbar(ax1, ax=ax[1], extend='max')
+
+        fig.colorbar(ax0, ax=ax.ravel().tolist())
+        # fig.subplots_adjust(right=0.8)
+        # cbar_ax = fig.add_axes([0.85, 0.175, 0.03, 0.65])
+        # fig.colorbar(ax0, cax=cbar_ax)
 
     return start_x, start_y, real_full_angle, theta_max_x, theta_max_y
 
 
-def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
+def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y, radius=1,
                                  num=3, plot=False):
     """
     Максимум энерговыделений вдоль трека.
@@ -193,6 +209,8 @@ def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, 
     :param start_angle_x: угол влёта в проекцию X
     :param start_angle_y: угол влёта в проекцию Y
     :param num: количество максимумов энерговыделения (возможно, меньше)
+    :param radius: количество стрипов, используемых для определения энерговыделения вдоль трека (в обе стороны)
+        (лучшее значение = 1, т.е. три стрипа)
     :param plot: рисовать график энерговыделений
     :return: Список пиков, список энерговыделений вдоль трека в проекциях X, Y
     """
@@ -203,25 +221,22 @@ def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, 
     # Если нет - берём стрип и два соседних
     dedx_track_x = []
     for z in range(22):
-        if (x_track[z] < 1) or (x_track[z] > 95):
+        if (x_track[z] < radius) or (x_track[z] > 95 - radius):
             dedx_track_x += [0.0]
         else:
-            dedx_track_x += [img_x[z, x_track[z] - 2] + img_x[z, x_track[z] - 1] + img_x[z, x_track[z] - 0]]
+            dedx_track_x += [sum([img_x[z, x] for x in range(x_track[z] - radius, x_track[z] + radius + 1)])]
 
     # Если трек вылетел за пределы калориметра, ставим 0;
-    # Если нет - берём стрип и два соседних
+    # Если нет - берём стрип и radius * 2 соседних
     dedx_track_y = []
     for z in range(22):
-        if (y_track[z] < 1) or (y_track[z] > 95):
+        if (y_track[z] < radius) or (y_track[z] > 95 - radius):
             dedx_track_y += [0.0]
         else:
-            dedx_track_y += \
-                [img_y[z, y_track[z] - 2] + \
-                 img_y[z, y_track[z] - 1] + \
-                 img_y[z, y_track[z] - 0]]
+            dedx_track_y += [sum([img_y[z, y] for y in range(y_track[z] - radius, y_track[z] + radius + 1)])]
 
     # TODO: нужен ли здесь параметр height?
-    peaks_info = scipy.signal.find_peaks(np.array(dedx_track_x) + np.array(dedx_track_y) + 1, height=4.0, distance=1)
+    peaks_info = scipy.signal.find_peaks(np.array(dedx_track_x) + np.array(dedx_track_y), height=4.0, distance=1)
 
     # Сортируем в порядке убывания значений
     if len(peaks_info[0]) > 0:
@@ -244,8 +259,9 @@ def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, 
 
 def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
              peak_threshold=0.0, peak_min_difference=np.pi / 18, weight_power=-0.5,
-             weight_shift=0.25, default_sigma=0.05, max_peaks=100, search_max=True,
-             verbose=False, plot=False, plot_result=False, output_file=None):
+             weight_shift=0.25, default_sigma=0.05, max_peaks=100, search_max=True, num_max_positions=3,
+             track_radius=1,
+             filter_img=None, verbose=False, plot=False, plot_result=False, output_file=None):
     """
     Поиск "звезды" взаимодействия.
     :param img_x: проекция X калориметра
@@ -261,6 +277,9 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
     :param default_sigma: ширина сглаживающей гауссианы
     :param max_peaks: максимальное количество порожденных частиц
     :param search_max: перебирать только максимумы энерговыделений вдоль трека (иначе проходим по всем точкам)
+    :param num_max_positions: количество исследуемых максимумов
+    :param track_radius: ширина цилиндра вдоль трека, по которой ищутся максимумы энерговыделения
+    :param filter_img: функция фильтрации изображения перед поиском точки взаимодействия
     :param verbose: включить текстовый вывод
     :param plot: нарисовать графики
     :param plot_result: вывести конечную звезду
@@ -273,8 +292,14 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
     polar_angles_list = np.arange(-np.pi, np.pi, polar_step)
     peak_angle_difference = (peak_min_difference // polar_step) + 1
 
-    zx, x = np.where(img_x > 0)
-    zy, y = np.where(img_y > 0)
+    img_xf, img_yf = np.copy(img_x), np.copy(img_y)
+
+    if filter_img is not None:
+        img_xf = filter_img(img_x)
+        img_yf = filter_img(img_y)
+
+    zx, x = np.where(img_xf > 0)
+    zy, y = np.where(img_yf > 0)
     zx = zx / K  # Масштабируем ось Z
     zy = zy / K
 
@@ -283,7 +308,7 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
     # Верхний радиус используется для того, чтобы убрать далекие точки
     # TODO: здесь, вероятно, нужно смотреть не более некоторого количества точек вдоль направления,
     #  а не ограничивать расстояние.
-    radius_upper = 1000.0
+    # radius_upper = 1000.0
 
     # Стартовые направления
     start_lineZ = np.arange(0, 22, 1.0)
@@ -304,8 +329,13 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
     # Проверяем только несколько пиков
     # - - - - - - - - - - - #
 
+    # Здесь мы берём нефильтрованное событие
+    max_positions = get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
+                                                 num=num_max_positions, radius=track_radius)[0]
+
     if search_max:
-        peaks_sorted = get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y)[0]
+        # Выбираем три максимальные позиции
+        peaks_sorted = max_positions
     else:
         peaks_sorted = range(22)
 
@@ -340,13 +370,13 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
         tmp_x, tmp_y = np.copy(x), np.copy(y)
         tmp_zx, tmp_zy = np.copy(zx), np.copy(zy)
 
-        tmp_x = tmp_x[(distX > radius_lower) & (distX < radius_upper)]
-        tmp_y = tmp_y[(distY > radius_lower) & (distY < radius_upper)]
-        tmp_zx = tmp_zx[(distX > radius_lower) & (distX < radius_upper)]
-        tmp_zy = tmp_zy[(distY > radius_lower) & (distY < radius_upper)]
+        filter_idx_x = distX > radius_lower  # | (zx >= new_z)
+        filter_idx_y = distY > radius_lower  # | (zy >= new_z)
 
-        # (polar_rhoX, polar_phiX) = cartesian_to_polar(K * (tmp_x - new_x), tmp_zx - new_z)
-        # (polar_rhoY, polar_phiY) = cartesian_to_polar(K * (tmp_y - new_y), tmp_zy - new_z)
+        tmp_x = tmp_x[filter_idx_x]
+        tmp_y = tmp_y[filter_idx_y]
+        tmp_zx = tmp_zx[filter_idx_x]
+        tmp_zy = tmp_zy[filter_idx_y]
 
         (polar_rhoX, polar_phiX) = cartesian2polar(tmp_x - new_x, tmp_zx - new_z)
         (polar_rhoY, polar_phiY) = cartesian2polar(tmp_y - new_y, tmp_zy - new_z)
@@ -365,8 +395,10 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
 
         if plot:
             fig, ax = plt.subplots(2, 1)
-            ax[0].plot(polar_angles_list, image_polarX)
-            ax[1].plot(polar_angles_list, image_polarY)
+            ax[0].plot(polar_angles_list, image_polarX, linestyle='-', color='k')
+            ax[0].plot([polar_angles_list[0], polar_angles_list[-1]], [peak_threshold, peak_threshold], '-r', lw=0.5)
+            ax[1].plot(polar_angles_list, image_polarY, linestyle='-', color='k')
+            ax[1].plot([polar_angles_list[0], polar_angles_list[-1]], [peak_threshold, peak_threshold], '-r', lw=0.5)
 
         polar_peaksX = polar_peaksX[polar_peaksX_values >= peak_threshold]
         polar_peaksY = polar_peaksY[polar_peaksY_values >= peak_threshold]
@@ -383,15 +415,17 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
         if peak_submitted and plot:
             fig, ax = plt.subplots(2, 1)
 
-            ax[0].scatter(x, zx)
+            ax[0].scatter(x, zx, s=4, c='k')
+            ax[0].scatter(tmp_x, tmp_zx, s=2, c='r')
             for angle in polar_angles_list[polar_peaksX]:
-                plot_line_by_start_point_and_angle(new_x, new_z, angle, ax=ax[0])
+                plot_line_by_start_point_and_angle(new_x, new_z, angle, ax=ax[0], color='r')
             ax[0].plot(start_lineX[start_lineZ <= new_z], start_lineZ[start_lineZ <= new_z], color='orange',
                        linestyle='--')
 
-            ax[1].scatter(y, zy)
+            ax[1].scatter(y, zy, s=4, c='k')
+            ax[1].scatter(tmp_y, tmp_zy, s=2, c='r')
             for angle in polar_angles_list[polar_peaksY]:
-                plot_line_by_start_point_and_angle(new_y, new_z, angle, ax=ax[1])
+                plot_line_by_start_point_and_angle(new_y, new_z, angle, ax=ax[1], color='r')
             ax[1].plot(start_lineY[start_lineZ <= new_z], start_lineZ[start_lineZ <= new_z], color='orange',
                        linestyle='--')
 
@@ -419,12 +453,12 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
 
             fig, ax = plt.subplots(2, 1)
 
-            ax[0].scatter(x, zx)
-            ax[0].plot(start_lineX[start_lineZ <= z_track_max], start_lineZ[start_lineZ <= z_track_max],
+            ax[0].imshow(img_x > 0, cmap='Greys')
+            ax[0].plot(start_lineX[start_lineZ <= z_track_max], start_lineZ[start_lineZ <= z_track_max] * K,
                        color='orange', linestyle='--')
 
-            ax[1].scatter(y, zy)
-            ax[1].plot(start_lineY[start_lineZ <= z_track_max], start_lineZ[start_lineZ <= z_track_max],
+            ax[1].imshow(img_y > 0, cmap='Greys')
+            ax[1].plot(start_lineY[start_lineZ <= z_track_max], start_lineZ[start_lineZ <= z_track_max] * K,
                        color='orange', linestyle='--')
 
             ax[0].set_title('X')
@@ -432,8 +466,8 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
 
             ax[0].set_xlim((0, 96))
             ax[1].set_xlim((0, 96))
-            ax[0].set_ylim((22 / K, 0))
-            ax[1].set_ylim((22 / K, 0))
+            ax[0].set_ylim((22, 0))
+            ax[1].set_ylim((22, 0))
 
             if output_file is not None:
                 plt.savefig(output_file)
@@ -448,16 +482,14 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
         vprint("Result peak index {0}".format(result_peak_idx))
 
         new_x, new_y, new_z = interaction_points[result_peak_idx]
-        # start_lineX[peak_z_idx], start_lineY[peak_z_idx], start_lineZ[peak_z_idx]
 
-        tmp_x = x[((distX > radius_lower) | (zx > new_z)) & (distX < radius_upper)]
-        tmp_y = y[((distY > radius_lower) | (zy > new_z)) & (distY < radius_upper)]
-        tmp_zx = zx[((distX > radius_lower) | (zx > new_z)) & (distX < radius_upper)]
-        tmp_zy = zy[((distY > radius_lower) | (zy > new_z)) & (distY < radius_upper)]
-        # tmp_x = x[((distX > radius_lower) | (zx > new_z))]
-        # tmp_y = y[((distY > radius_lower) | (zy > new_z))]
-        # tmp_zx = zx[((distX > radius_lower) | (zx > new_z))]
-        # tmp_zy = zy[((distY > radius_lower) | (zy > new_z))]
+        filter_idx_x = (distX > radius_lower) | (zx >= new_z + radius_lower)
+        filter_idx_y = (distY > radius_lower) | (zy >= new_z + radius_lower)
+
+        tmp_x = x[filter_idx_x]
+        tmp_y = y[filter_idx_y]
+        tmp_zx = zx[filter_idx_x]
+        tmp_zy = zy[filter_idx_y]
 
         (polar_rhoX, polar_phiX) = cartesian2polar(tmp_x - new_x, tmp_zx - new_z)
         (polar_rhoY, polar_phiY) = cartesian2polar(tmp_y - new_y, tmp_zy - new_z)
@@ -475,18 +507,25 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
         if plot_result:
             fig, ax = plt.subplots(2, 1)
 
-            # ax[0].imshow(img_x > 0)
-            ax[0].scatter(x, zx)
+            ax[0].imshow(img_x > 0, cmap='Greys')
+            ax[0].scatter(tmp_x, tmp_zx * K, s=2, c='r')
             for angle in polar_angles_list[polar_peaksX]:
-                plot_line_by_start_point_and_angle(new_x, new_z, angle, ax=ax[0])
-            ax[0].plot(start_lineX[start_lineZ <= new_z], start_lineZ[start_lineZ <= new_z], color='orange',
+                if np.cos(angle) < 0:
+                    plot_line_by_start_point_and_angle(new_x, new_z * K, np.pi - image_angle2real(np.pi - angle), ax=ax[0], color='r')
+                else:
+                    plot_line_by_start_point_and_angle(new_x, new_z * K, image_angle2real(angle), ax=ax[0], color='r')
+
+            ax[0].plot(start_lineX[start_lineZ <= new_z], start_lineZ[start_lineZ <= new_z] * K, color='orange',
                        linestyle='--')
 
-            # ax[1].imshow(img_y > 0)
-            ax[1].scatter(y, zy)
+            ax[1].imshow(img_y > 0, cmap='Greys')
+            ax[1].scatter(tmp_y, tmp_zy * K, s=2, c='r')
             for angle in polar_angles_list[polar_peaksY]:
-                plot_line_by_start_point_and_angle(new_y, new_z, angle, ax=ax[1])
-            ax[1].plot(start_lineY[start_lineZ <= new_z], start_lineZ[start_lineZ <= new_z], color='orange',
+                if np.cos(angle) < 0:
+                    plot_line_by_start_point_and_angle(new_y, new_z * K, np.pi - image_angle2real(np.pi - angle), ax=ax[1], color='r')
+                else:
+                    plot_line_by_start_point_and_angle(new_y, new_z * K, image_angle2real(angle), ax=ax[1], color='r')
+            ax[1].plot(start_lineY[start_lineZ <= new_z], start_lineZ[start_lineZ <= new_z] * K, color='orange',
                        linestyle='--')
 
             ax[0].set_title('X')
@@ -494,8 +533,8 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
 
             ax[0].set_xlim((0, 96))
             ax[1].set_xlim((0, 96))
-            ax[0].set_ylim((22 / K, 0))
-            ax[1].set_ylim((22 / K, 0))
+            ax[0].set_ylim((22, 0))
+            ax[1].set_ylim((22, 0))
 
             if output_file is not None:
                 plt.savefig(output_file)
