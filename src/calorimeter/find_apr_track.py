@@ -31,7 +31,7 @@ DIST_MATRIX = np.transpose([[np.sqrt(j + 1) for j in np.arange(0, 22, 1)] for i 
 def_peak_threshold = 15.0  # peak_threshold - минимальное значение максимума
 def_peak_min_difference = np.pi / 18  # peak_min_difference - минимальное угловое расстояние между пиками
 def_inclination_weight_power = -1.8  # weight_power - показатель весовой функции
-def_inclination_weight_shift = 0.25  # weight_shift - смещение весовой функции
+def_inclination_weight_shift = 0.5  # weight_shift - смещение весовой функции
 def_star_weight_power = -0.3  # weight_power - показатель весовой функции
 def_star_weight_shift = 0.25  # weight_shift - смещение весовой функции
 def_default_sigma = 0.05  # default_sigma - ширина сглаживающей гауссианы
@@ -97,6 +97,26 @@ def _gaussian_sum_1d_weighted(val, centers, sigma, weights):
         center = centers[i]
         mv = scipy.stats.norm(center, sigma)
         field += mv.pdf(val) * weights[i]
+    return field
+
+
+def _gaussian_sum_1d_weighted_circular(val, centers, sigma, weights):
+    """
+    Сумма гауссиан с указанными центрами и фиксированной шириной и различными весами
+    TODO: сделать аккуратнее
+    :param val: точки, в которых считается распределение (здесь мы считаем, что они равномерно распределены от -pi до pi!
+    :param centers: центры гауссиан
+    :param sigma: сигмы гауссиан
+    :param weights: веса, с которыми берутся гауссианы
+    :return: значения распределения в точках val
+    """
+    field = np.zeros(val.shape)
+    for i in range(len(centers)):
+        center = centers[i]
+        mv = scipy.stats.norm(center, sigma)
+        field += mv.pdf(val) * weights[i]
+        field += mv.pdf(val - np.pi * 2) * weights[i]
+        field += mv.pdf(val + np.pi * 2) * weights[i]
     return field
 
 
@@ -260,7 +280,7 @@ def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, 
 def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
              peak_threshold=0.0, peak_min_difference=np.pi / 18, weight_power=-0.5,
              weight_shift=0.25, default_sigma=0.05, max_peaks=100, search_max=True, num_max_positions=3,
-             track_radius=1,
+             track_radius=1, method='default',
              filter_img=None, verbose=False, plot=False, plot_result=False, output_file=None):
     """
     Поиск "звезды" взаимодействия.
@@ -279,6 +299,7 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
     :param search_max: перебирать только максимумы энерговыделений вдоль трека (иначе проходим по всем точкам)
     :param num_max_positions: количество исследуемых максимумов
     :param track_radius: ширина цилиндра вдоль трека, по которой ищутся максимумы энерговыделения
+    :param method: метод сглаживания распределения в полярных координатах ('default', 'kde')
     :param filter_img: функция фильтрации изображения перед поиском точки взаимодействия
     :param verbose: включить текстовый вывод
     :param plot: нарисовать графики
@@ -381,10 +402,24 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
         (polar_rhoX, polar_phiX) = cartesian2polar(tmp_x - new_x, tmp_zx - new_z)
         (polar_rhoY, polar_phiY) = cartesian2polar(tmp_y - new_y, tmp_zy - new_z)
 
-        image_polarX = _gaussian_sum_1d_weighted(polar_angles_list, polar_phiX, default_sigma,
-                                                 np.power(polar_rhoX + weight_shift, weight_power))
-        image_polarY = _gaussian_sum_1d_weighted(polar_angles_list, polar_phiY, default_sigma,
-                                                 np.power(polar_rhoY + weight_shift, weight_power))
+        if method == 'default':
+            image_polarX = _gaussian_sum_1d_weighted_circular(polar_angles_list, polar_phiX, default_sigma,
+                                                     np.power(polar_rhoX + weight_shift, weight_power))
+            image_polarY = _gaussian_sum_1d_weighted_circular(polar_angles_list, polar_phiY, default_sigma,
+                                                     np.power(polar_rhoY + weight_shift, weight_power))
+        elif method == 'kde':
+            if len(polar_phiX) > 1:
+                image_polarX = len(polar_phiX) * scipy.stats.gaussian_kde(
+                    polar_phiX, bw_method=default_sigma, weights=np.power(polar_rhoX + weight_shift, weight_power)
+                ).evaluate(polar_angles_list)
+            else:
+                image_polarX = polar_angles_list * 0
+            if len(polar_phiY) > 1:
+                image_polarY = len(polar_phiY) * scipy.stats.gaussian_kde(
+                    polar_phiY, bw_method=default_sigma, weights=np.power(polar_rhoY + weight_shift, weight_power)
+                ).evaluate(polar_angles_list)
+            else:
+                image_polarY = polar_angles_list * 0
 
         # Ищем пики распределения
         polar_peaksX = scipy.signal.find_peaks(image_polarX, distance=peak_angle_difference)[0][:max_peaks]
@@ -394,11 +429,44 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
         vprint(polar_peaksX, polar_peaksY)
 
         if plot:
-            fig, ax = plt.subplots(2, 1)
-            ax[0].plot(polar_angles_list, image_polarX, linestyle='-', color='k')
-            ax[0].plot([polar_angles_list[0], polar_angles_list[-1]], [peak_threshold, peak_threshold], '-r', lw=0.5)
-            ax[1].plot(polar_angles_list, image_polarY, linestyle='-', color='k')
-            ax[1].plot([polar_angles_list[0], polar_angles_list[-1]], [peak_threshold, peak_threshold], '-r', lw=0.5)
+            ticks = np.linspace(-np.pi, np.pi, 5, endpoint=True)
+            labels = [r'$-\pi$', r'$-\frac{\pi}{2}$', '$0$', r'$\frac{\pi}{2}$', r'$\pi$']
+
+            fig, ax = plt.subplots(2, 2)
+            ax[0][0].scatter(polar_phiX, polar_rhoX, s=5, c='k')
+            ax[0][0].set_xlabel(r'$\varphi$, rad.')
+            ax[0][0].set_ylabel(r'$\rho$')
+            ax[0][0].set_xlim(-np.pi - 0.2, np.pi + 0.2)
+            ax[0][0].set_xticks(ticks)
+            ax[0][0].set_xticklabels(labels)
+            ax[0][0].plot([polar_angles_list[polar_peaksX[i]] for i in range(len(polar_peaksX))], polar_peaksX * 0, 'xr')
+
+            ax[0][1].plot(polar_angles_list, image_polarX, linestyle='-', color='k')
+            ax[0][1].plot([polar_angles_list[0], polar_angles_list[-1]], [peak_threshold, peak_threshold], '--r', lw=0.5)
+            ax[0][1].set_xlabel(r'$\varphi$, rad.')
+            ax[0][1].set_ylabel('Density')
+            ax[0][1].set_xticks(ticks)
+            ax[0][1].set_xticklabels(labels)
+            for i in range(len(polar_peaksX)):
+                ax[0][1].plot([polar_angles_list[polar_peaksX[i]], polar_angles_list[polar_peaksX[i]]],
+                              [0, polar_peaksX_values[i]], '--r')
+
+            ax[1][0].scatter(polar_phiY, polar_rhoY, s=5, c='k')
+            ax[1][0].set_xlabel(r'$\varphi$, rad.')
+            ax[1][0].set_ylabel(r'$\rho$')
+            ax[1][0].set_xticks(ticks)
+            ax[1][0].set_xticklabels(labels)
+            ax[1][0].plot([polar_angles_list[polar_peaksY[i]] for i in range(len(polar_peaksY))], polar_peaksY * 0, 'xr')
+
+            ax[1][1].plot(polar_angles_list, image_polarY, linestyle='-', color='k')
+            ax[1][1].plot([polar_angles_list[0], polar_angles_list[-1]], [peak_threshold, peak_threshold], '--r', lw=0.5)
+            ax[1][1].set_xlabel(r'$\varphi$, rad.')
+            ax[1][1].set_ylabel('Density')
+            ax[1][1].set_xticks(ticks)
+            ax[1][1].set_xticklabels(labels)
+            for i in range(len(polar_peaksX)):
+                ax[1][1].plot([polar_angles_list[polar_peaksY[i]], polar_angles_list[polar_peaksY[i]]],
+                              [0, polar_peaksY_values[i]], '--r')
 
         polar_peaksX = polar_peaksX[polar_peaksX_values >= peak_threshold]
         polar_peaksY = polar_peaksY[polar_peaksY_values >= peak_threshold]
@@ -493,9 +561,9 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
 
         (polar_rhoX, polar_phiX) = cartesian2polar(tmp_x - new_x, tmp_zx - new_z)
         (polar_rhoY, polar_phiY) = cartesian2polar(tmp_y - new_y, tmp_zy - new_z)
-        image_polarX = _gaussian_sum_1d_weighted(polar_angles_list, polar_phiX, default_sigma,
+        image_polarX = _gaussian_sum_1d_weighted_circular(polar_angles_list, polar_phiX, default_sigma,
                                                  np.power(polar_rhoX + weight_shift, weight_power))
-        image_polarY = _gaussian_sum_1d_weighted(polar_angles_list, polar_phiY, default_sigma,
+        image_polarY = _gaussian_sum_1d_weighted_circular(polar_angles_list, polar_phiY, default_sigma,
                                                  np.power(polar_rhoY + weight_shift, weight_power))
 
         polar_peaksX = scipy.signal.find_peaks(image_polarX, distance=peak_angle_difference)[0]
@@ -508,7 +576,7 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
             fig, ax = plt.subplots(2, 1)
 
             ax[0].imshow(img_x > 0, cmap='Greys')
-            ax[0].scatter(tmp_x, tmp_zx * K, s=2, c='r')
+            # ax[0].scatter(tmp_x, tmp_zx * K, s=4, c='r')
             for angle in polar_angles_list[polar_peaksX]:
                 if np.cos(angle) < 0:
                     plot_line_by_start_point_and_angle(new_x, new_z * K, np.pi - image_angle2real(np.pi - angle), ax=ax[0], color='r')
@@ -519,7 +587,7 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
                        linestyle='--')
 
             ax[1].imshow(img_y > 0, cmap='Greys')
-            ax[1].scatter(tmp_y, tmp_zy * K, s=2, c='r')
+            # ax[1].scatter(tmp_y, tmp_zy * K, s=4, c='r')
             for angle in polar_angles_list[polar_peaksY]:
                 if np.cos(angle) < 0:
                     plot_line_by_start_point_and_angle(new_y, new_z * K, np.pi - image_angle2real(np.pi - angle), ax=ax[1], color='r')
