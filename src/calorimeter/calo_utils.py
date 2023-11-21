@@ -20,6 +20,11 @@ def image_angle2real(theta):
     :param theta:
     :return:
     """
+
+    # if np.cos(theta) < 0:
+    #     return np.pi - np.arctan(K * (np.pi - theta))
+    # else:
+
     return np.arctan(K * np.tan(theta))
 
 
@@ -71,3 +76,4 @@ def plot_line_by_start_point_and_angle(x, z, angle, ax=None, color='r'):
 
     new_x, new_z = polar2cartesian(100.0, angle)
     ax.plot([x, x + new_x], [z, z + new_z], color=color)
+

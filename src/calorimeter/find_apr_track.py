@@ -121,6 +121,7 @@ def _gaussian_sum_1d_weighted_circular(val, centers, sigma, weights):
 
 
 def get_start_direction(img_x_src, img_y_src, weight_power=-1.8, shift=0.25, num_directions=80,
+                        max_theta=max_image_angle,
                         plot_track=False, plot_title='', verbose=False):
     """
     Вычисляем направление влёта частицы в калориметр.
@@ -128,6 +129,7 @@ def get_start_direction(img_x_src, img_y_src, weight_power=-1.8, shift=0.25, num
     :param img_y_src: Проекция Y
     :param weight_power: Весовой коэффициент в матрице преобразования Хафа
     :param shift: Сдвиг для весовой функции
+    :param max_theta: Ограничение по углу влёта
     :param plot_track: Показать картинку с треком
     :param plot_title: Заголовок для графика
     :param verbose: Включить текстовый вывод
@@ -137,7 +139,7 @@ def get_start_direction(img_x_src, img_y_src, weight_power=-1.8, shift=0.25, num
     vprint = print if verbose else lambda *a, **k: None
 
     # Диапазон допустимых питч-углов
-    pitch_theta = np.linspace(-max_image_angle, max_image_angle, num_directions, endpoint=False)
+    pitch_theta = np.linspace(-max_theta, max_theta, num_directions, endpoint=False)
 
     img_x = (img_x_src > 0).astype(np.float64) * np.power(DIST_MATRIX + shift, weight_power)
     img_y = (img_y_src > 0).astype(np.float64) * np.power(DIST_MATRIX + shift, weight_power)
@@ -166,7 +168,7 @@ def get_start_direction(img_x_src, img_y_src, weight_power=-1.8, shift=0.25, num
 
         vprint('Full angle = {0:.3f}'.format(full_angle))
 
-        if full_angle > max_image_angle:
+        if full_angle > max_theta:
             if ix == ix_max:
                 iy += 1
             elif iy == iy_max:
@@ -189,8 +191,8 @@ def get_start_direction(img_x_src, img_y_src, weight_power=-1.8, shift=0.25, num
     start_y = r_max_y / np.cos(theta_max_y)
 
     # Корректируем угол влёта с учётом разного масштаба по осям X/Y и Z
-    start_angle_x_corr = np.arctan(K * np.tan(theta_max_x))
-    start_angle_y_corr = np.arctan(K * np.tan(theta_max_y))
+    start_angle_x_corr = image_angle2real(theta_max_x)
+    start_angle_y_corr = image_angle2real(theta_max_y)
 
     # Восстанавливаем угол влёта по двум проекциям
     real_full_angle = get_angle_by_projections(start_angle_x_corr, start_angle_y_corr)
@@ -215,6 +217,7 @@ def get_start_direction(img_x_src, img_y_src, weight_power=-1.8, shift=0.25, num
         # fig.colorbar(ax0, cax=cbar_ax)
 
     return start_x, start_y, real_full_angle, theta_max_x, theta_max_y
+    # return start_x, start_y, real_full_angle, start_angle_x_corr, start_angle_y_corr
 
 
 def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y, radius=1,
@@ -226,8 +229,8 @@ def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, 
     :param img_y: проекция Y
     :param start_x: точка влёта в проекцию X
     :param start_y: точка влёта в проекцию Y
-    :param start_angle_x: угол влёта в проекцию X
-    :param start_angle_y: угол влёта в проекцию Y
+    :param start_angle_x: угол влёта в проекцию X (на картинке)
+    :param start_angle_y: угол влёта в проекцию Y (на картинке)
     :param num: количество максимумов энерговыделения (возможно, меньше)
     :param radius: количество стрипов, используемых для определения энерговыделения вдоль трека (в обе стороны)
         (лучшее значение = 1, т.е. три стрипа)
@@ -288,8 +291,8 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
     :param img_y: проекция Y калориметра
     :param start_x: точка влёта в калориметр (координата X)
     :param start_y: точка влёта в калориметр (координата Y)
-    :param start_angle_x: угол влёта в калориметр (координата X)
-    :param start_angle_y: угол влёта в калориметр (координата Y)
+    :param start_angle_x: угол влёта в калориметр (координата X), на картинке (!)
+    :param start_angle_y: угол влёта в калориметр (координата Y), на картинке (!)
     :param peak_threshold: минимальное значение функции для признания точки максимума пиком
     :param peak_min_difference: минимальное угловое расстояние между пиками
     :param weight_power: показатель весовой функции (для поиска звезды)
@@ -333,9 +336,13 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
 
     # Стартовые направления
     start_lineZ = np.arange(0, 22, 1.0)
+
+    # !Здесь происходит масштабирование!
     start_lineX = start_x - np.tan(start_angle_x) * start_lineZ
     start_lineY = start_y - np.tan(start_angle_y) * start_lineZ
     start_lineZ = start_lineZ / K
+
+    print(start_lineZ)
 
     distX = np.array(
         [_dist_from_line_to_point(start_lineX[0], start_lineZ[0], start_lineX[-1], start_lineZ[-1], x[i], zx[i])
@@ -464,7 +471,7 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
             ax[1][1].set_ylabel('Density')
             ax[1][1].set_xticks(ticks)
             ax[1][1].set_xticklabels(labels)
-            for i in range(len(polar_peaksX)):
+            for i in range(len(polar_peaksY)):
                 ax[1][1].plot([polar_angles_list[polar_peaksY[i]], polar_angles_list[polar_peaksY[i]]],
                               [0, polar_peaksY_values[i]], '--r')
 

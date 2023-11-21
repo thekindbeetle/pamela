@@ -17,6 +17,13 @@ class Calorimeter:
     def __init__(self, arr):
         self.data = arr
 
+    @classmethod
+    def from_projections(cls, proj_x, proj_y):
+        data = np.zeros((44, 96))
+        data[1::2, :] = proj_x
+        data[0::2, :] = proj_y
+        return Calorimeter(data)
+
     @staticmethod
     def plane_quality(strips):
         """
