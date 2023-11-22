@@ -220,22 +220,18 @@ def get_start_direction(img_x_src, img_y_src, weight_power=-1.8, shift=0.25, num
     # return start_x, start_y, real_full_angle, start_angle_x_corr, start_angle_y_corr
 
 
-def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y, radius=1,
-                                 num=3, plot=False):
+def get_track_dedx(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y, radius=1):
     """
-    Максимум энерговыделений вдоль трека.
-    В среднем должен соответствовать плоскости взаимодействия.
+    Энерговыделения в треке частицы
     :param img_x: проекция X
     :param img_y: проекция Y
     :param start_x: точка влёта в проекцию X
     :param start_y: точка влёта в проекцию Y
     :param start_angle_x: угол влёта в проекцию X (на картинке)
     :param start_angle_y: угол влёта в проекцию Y (на картинке)
-    :param num: количество максимумов энерговыделения (возможно, меньше)
     :param radius: количество стрипов, используемых для определения энерговыделения вдоль трека (в обе стороны)
         (лучшее значение = 1, т.е. три стрипа)
-    :param plot: рисовать график энерговыделений
-    :return: Список пиков, список энерговыделений вдоль трека в проекциях X, Y
+    @return:
     """
     x_track = np.round(start_x - np.tan(start_angle_x) * np.arange(0.5, 22.5, 1.0)).astype(int)
     y_track = np.round(start_y - np.tan(start_angle_y) * np.arange(0.5, 22.5, 1.0)).astype(int)
@@ -258,8 +254,32 @@ def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, 
         else:
             dedx_track_y += [sum([img_y[z, y] for y in range(y_track[z] - radius, y_track[z] + radius + 1)])]
 
+    return dedx_track_x, dedx_track_y
+
+
+def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y, radius=1,
+                                 num=3, plot=False):
+    """
+    Максимум энерговыделений вдоль трека.
+    В среднем должен соответствовать плоскости взаимодействия.
+    :param img_x: проекция X
+    :param img_y: проекция Y
+    :param start_x: точка влёта в проекцию X
+    :param start_y: точка влёта в проекцию Y
+    :param start_angle_x: угол влёта в проекцию X (на картинке)
+    :param start_angle_y: угол влёта в проекцию Y (на картинке)
+    :param num: количество максимумов энерговыделения (возможно, меньше)
+    :param radius: количество стрипов, используемых для определения энерговыделения вдоль трека (в обе стороны)
+        (лучшее значение = 1, т.е. три стрипа)
+    :param plot: рисовать график энерговыделений
+    :return: Список пиков, список энерговыделений вдоль трека в проекциях X, Y
+    """
+    dedx_track_x, dedx_track_y = \
+        get_track_dedx(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y, radius=radius)
+
     # TODO: нужен ли здесь параметр height?
-    peaks_info = scipy.signal.find_peaks(np.array(dedx_track_x) + np.array(dedx_track_y), height=4.0, distance=1)
+    # peaks_info = scipy.signal.find_peaks(np.array(dedx_track_x) + np.array(dedx_track_y), height=4.0, distance=1)
+    peaks_info = scipy.signal.find_peaks(np.array(dedx_track_x) + np.array(dedx_track_y), height=0.0, distance=1)
 
     # Сортируем в порядке убывания значений
     if len(peaks_info[0]) > 0:
@@ -342,7 +362,7 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
     start_lineY = start_y - np.tan(start_angle_y) * start_lineZ
     start_lineZ = start_lineZ / K
 
-    print(start_lineZ)
+    # print(start_lineZ)
 
     distX = np.array(
         [_dist_from_line_to_point(start_lineX[0], start_lineZ[0], start_lineX[-1], start_lineZ[-1], x[i], zx[i])
@@ -357,15 +377,17 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
     # Проверяем только несколько пиков
     # - - - - - - - - - - - #
 
-    # Здесь мы берём нефильтрованное событие
-    max_positions = get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
-                                                 num=num_max_positions, radius=track_radius)[0]
-
     if search_max:
+        # Здесь мы берём нефильтрованное событие
         # Выбираем три максимальные позиции
-        peaks_sorted = max_positions
+        peaks_sorted = get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
+                                                     num=num_max_positions, radius=track_radius)[0]
     else:
-        peaks_sorted = range(22)
+        # Выбираем только ненулевые значения
+        dedx_track_x, dedx_track_y = \
+            get_track_dedx(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y, radius=track_radius)
+        peaks_sorted = [p for p in range(22) if dedx_track_x[p] + dedx_track_y[p] > 0]
+        # print(peaks_sorted)
 
     vprint("Peaks positions: ", peaks_sorted)
 
