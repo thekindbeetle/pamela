@@ -120,9 +120,12 @@ def _gaussian_sum_1d_weighted_circular(val, centers, sigma, weights):
     return field
 
 
-def get_start_direction(img_x_src, img_y_src, weight_power=-1.8, shift=0.25, num_directions=80,
-                        max_theta=max_image_angle,
-                        plot_track=False, plot_title='', verbose=False):
+def get_start_direction(img_x_src, img_y_src, weight_power=-1.8, shift=0.25, num_directions=180,
+                        max_theta=max_image_angle, crop=22,
+                        plot_track=False, plot_title='',
+                        plot_real_track=False,
+                        start_x_real=None, start_y_real=None, theta_x_real=None, theta_y_real=None,
+                        verbose=False):
     """
     Вычисляем направление влёта частицы в калориметр.
     :param img_x_src: Проекция X
@@ -135,54 +138,42 @@ def get_start_direction(img_x_src, img_y_src, weight_power=-1.8, shift=0.25, num
     :param verbose: Включить текстовый вывод
     :param num_directions: Количество различных углов (для преобразования Хафа)
     :return: X, Y, угол влёта, углы влёта в проекциях X, Y
+    @param plot_real_track: Нарисовать настоящий трек
+    @param theta_x_real:
+    @param theta_y_real:
+    @param start_x_real:
+    @param start_y_real:
     """
     vprint = print if verbose else lambda *a, **k: None
 
-    # Диапазон допустимых питч-углов
-    pitch_theta = np.linspace(-max_theta, max_theta, num_directions, endpoint=False)
+    # Диапазон допустимых питч-углов (Берём весь диапазон)
+    pitch_theta = np.linspace(-np.pi / 2, np.pi / 2, num_directions, endpoint=False)
 
-    img_x = (img_x_src > 0).astype(np.float64) * np.power(DIST_MATRIX + shift, weight_power)
-    img_y = (img_y_src > 0).astype(np.float64) * np.power(DIST_MATRIX + shift, weight_power)
+    img_x = (img_x_src[:crop, :] > 0).astype(np.float64) * np.power(DIST_MATRIX[:crop, :] + shift, weight_power)
+    img_y = (img_y_src[:crop, :] > 0).astype(np.float64) * np.power(DIST_MATRIX[:crop, :] + shift, weight_power)
 
     hX, thetaX, dX = hough_line(img_x, theta=pitch_theta)
     hY, thetaY, dY = hough_line(img_y, theta=pitch_theta)
 
     # Выбираем стартовую точку
     # Есть проблема: восстановленный угол может быть больше максимально возможного угла.
-    # Здесь фактически выбирается допустимое направление с наибольшим значением суммы аккумуляторов Хафа
-    ix, iy = 0, 0
+    # Сначала мы просто смотрим пики в пространстве Хафа
     peaksX = hough_line_peaks(hX, thetaX, dX, threshold=0.0)
     peaksY = hough_line_peaks(hY, thetaY, dY, threshold=0.0)
 
-    ix_max = len(peaksX[0]) - 1
-    iy_max = len(peaksY[0]) - 1
+    # Далее мы выбираем пару углов с максимальной суммой аккумулятрорв Хафа так, чтобы угол был допустимым.
+    # !TODO: учесть зависимость от точки влёта: углы влёта ограничены в зависимости от точки влёта.
+    # Т.е., если точка влёта с краю, то частица влетела не со стороны этого самого края.
+    AX, AY = np.meshgrid(peaksX[1], peaksY[1])
+    full_angles_idx = get_angle_by_projections(AX, AY) < max_theta
+    hough_valueX, hough_valueY = np.meshgrid(peaksX[0], peaksY[0])
+    hough_value = hough_valueX + hough_valueY
+
+    # !TODO: check order
+    iy, ix = np.unravel_index(np.argmax(full_angles_idx * hough_value), hough_value.shape)
 
     vprint('Peaks X: {0}'.format(peaksX))
     vprint('Peaks Y: {0}'.format(peaksY))
-
-    while (ix <= ix_max) and (iy <= iy_max):
-        vprint('Check ix = {0}, iy = {1}'.format(ix, iy))
-        vprint('Functions sum = {0:.3f}'.format(peaksX[0][ix] + peaksY[0][iy]))
-
-        full_angle = get_angle_by_projections(peaksX[1][ix], peaksY[1][iy])
-
-        vprint('Full angle = {0:.3f}'.format(full_angle))
-
-        if full_angle > max_theta:
-            if ix == ix_max:
-                iy += 1
-            elif iy == iy_max:
-                ix += 1
-            elif (peaksX[0][ix] - peaksX[0][ix + 1]) <= (peaksY[0][iy] - peaksY[0][iy + 1]):
-                ix += 1
-            else:
-                iy += 1
-        else:
-            break
-
-        if (ix > ix_max) or (iy > iy_max):
-            ix, iy = 0, 0
-            break
 
     r_max_x, theta_max_x = peaksX[2][ix], peaksX[1][ix]
     r_max_y, theta_max_y = peaksY[2][iy], peaksY[1][iy]
@@ -205,16 +196,15 @@ def get_start_direction(img_x_src, img_y_src, weight_power=-1.8, shift=0.25, num
 
         ax0 = ax[0].imshow(img_x_src, norm=colors.LogNorm(vmin=0.7, vmax=10.0), cmap='Greys')
         ax[0].axline((start_x, 0), slope=np.tan(theta_max_x + np.pi / 2), color='r', lw=2)
-        # fig.colorbar(ax0, ax=ax[0], extend='max')
+        if plot_real_track:
+            ax[0].axline((start_x_real, 0), slope=np.tan(theta_x_real + np.pi / 2), color='green', lw=1)
 
         ax1 = ax[1].imshow(img_y_src, norm=colors.LogNorm(vmin=0.7, vmax=10.0), cmap='Greys')
         ax[1].axline((start_y, 0), slope=np.tan(theta_max_y + np.pi / 2), color='r', lw=2)
-        # fig.colorbar(ax1, ax=ax[1], extend='max')
+        if plot_real_track:
+            ax[1].axline((start_y_real, 0), slope=np.tan(theta_y_real + np.pi / 2), color='green', lw=1)
 
         fig.colorbar(ax0, ax=ax.ravel().tolist())
-        # fig.subplots_adjust(right=0.8)
-        # cbar_ax = fig.add_axes([0.85, 0.175, 0.03, 0.65])
-        # fig.colorbar(ax0, cax=cbar_ax)
 
     return start_x, start_y, real_full_angle, theta_max_x, theta_max_y
     # return start_x, start_y, real_full_angle, start_angle_x_corr, start_angle_y_corr
@@ -254,7 +244,7 @@ def get_track_dedx(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
         else:
             dedx_track_y += [sum([img_y[z, y] for y in range(y_track[z] - radius, y_track[z] + radius + 1)])]
 
-    return dedx_track_x, dedx_track_y
+    return np.array(dedx_track_x), np.array(dedx_track_y)
 
 
 def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y, radius=1,
@@ -277,15 +267,20 @@ def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, 
     dedx_track_x, dedx_track_y = \
         get_track_dedx(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y, radius=radius)
 
+    dedx_track_x, dedx_track_y = np.array(dedx_track_x), np.array(dedx_track_y)
+
     # TODO: нужен ли здесь параметр height?
-    # peaks_info = scipy.signal.find_peaks(np.array(dedx_track_x) + np.array(dedx_track_y), height=4.0, distance=1)
-    peaks_info = scipy.signal.find_peaks(np.array(dedx_track_x) + np.array(dedx_track_y), height=0.0, distance=1)
+    peaks_info = scipy.signal.find_peaks(dedx_track_x + dedx_track_y, height=1.0, distance=1)
+    # peaks_info = scipy.signal.find_peaks(np.array(dedx_track_x) + np.array(dedx_track_y), height=0.0, distance=1)
 
     # Сортируем в порядке убывания значений
     if len(peaks_info[0]) > 0:
         peaks_sorted = peaks_info[0][np.argsort(peaks_info[1]['peak_heights'])][::-1]
     else:
         peaks_sorted = []
+
+    # Если в точке нет энерговыделения для какой-то проекции, то оона не может быть точкой взаимодействия.
+    peaks_sorted = [p for p in peaks_sorted if ((dedx_track_x[p] > 0) and (dedx_track_y[p] > 0))]
 
     if plot:
         fig, ax = plt.subplots(2, 1)
@@ -348,7 +343,9 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
     zy = zy / K
 
     # Нижний радиус используется для того, чтобы убрать точки с трека первичной частицы
-    radius_lower = np.sqrt(2)
+    # radius_lower = np.sqrt(2)
+    # radius_lower = 4
+    radius_lower = 2
     # Верхний радиус используется для того, чтобы убрать далекие точки
     # TODO: здесь, вероятно, нужно смотреть не более некоторого количества точек вдоль направления,
     #  а не ограничивать расстояние.
@@ -590,10 +587,25 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
 
         (polar_rhoX, polar_phiX) = cartesian2polar(tmp_x - new_x, tmp_zx - new_z)
         (polar_rhoY, polar_phiY) = cartesian2polar(tmp_y - new_y, tmp_zy - new_z)
-        image_polarX = _gaussian_sum_1d_weighted_circular(polar_angles_list, polar_phiX, default_sigma,
-                                                 np.power(polar_rhoX + weight_shift, weight_power))
-        image_polarY = _gaussian_sum_1d_weighted_circular(polar_angles_list, polar_phiY, default_sigma,
-                                                 np.power(polar_rhoY + weight_shift, weight_power))
+
+        if method == 'default':
+            image_polarX = _gaussian_sum_1d_weighted_circular(polar_angles_list, polar_phiX, default_sigma,
+                                                     np.power(polar_rhoX + weight_shift, weight_power))
+            image_polarY = _gaussian_sum_1d_weighted_circular(polar_angles_list, polar_phiY, default_sigma,
+                                                     np.power(polar_rhoY + weight_shift, weight_power))
+        elif method == 'kde':
+            if len(polar_phiX) > 1:
+                image_polarX = len(polar_phiX) * scipy.stats.gaussian_kde(
+                    polar_phiX, bw_method=default_sigma, weights=np.power(polar_rhoX + weight_shift, weight_power)
+                ).evaluate(polar_angles_list)
+            else:
+                image_polarX = polar_angles_list * 0
+            if len(polar_phiY) > 1:
+                image_polarY = len(polar_phiY) * scipy.stats.gaussian_kde(
+                    polar_phiY, bw_method=default_sigma, weights=np.power(polar_rhoY + weight_shift, weight_power)
+                ).evaluate(polar_angles_list)
+            else:
+                image_polarY = polar_angles_list * 0
 
         polar_peaksX = scipy.signal.find_peaks(image_polarX, distance=peak_angle_difference)[0]
         polar_peaksY = scipy.signal.find_peaks(image_polarY, distance=peak_angle_difference)[0]
