@@ -19,7 +19,7 @@ from util.coord_transform import cartesian2polar
 from hough_transform.hough2d import hough_line
 from skimage.transform import hough_line_peaks
 
-matplotlib.use('QT5Agg')
+# matplotlib.use('QT5Agg')
 
 # Матрица расстояний, которая передаётся в преобразование Хафа
 DIST_MATRIX = np.transpose([[np.sqrt(j + 1) for j in np.arange(0, 22, 1)] for i in np.arange(0, 96, 1)])
@@ -244,8 +244,7 @@ def get_track_dedx(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
         else:
             dedx_track_y += [sum([img_y[z, y] for y in range(y_track[z] - radius, y_track[z] + radius + 1)])]
 
-    return np.array(dedx_track_x), np.array(dedx_track_y)
-
+    return np.array(dedx_track_x), np.array(dedx_track_y), x_track, y_track
 
 def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y, radius=1,
                                  num=3, plot=False):
@@ -264,10 +263,10 @@ def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, 
     :param plot: рисовать график энерговыделений
     :return: Список пиков, список энерговыделений вдоль трека в проекциях X, Y
     """
-    dedx_track_x, dedx_track_y = \
+    dedx_track_x, dedx_track_y, x_track, y_track = \
         get_track_dedx(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y, radius=radius)
 
-    dedx_track_x, dedx_track_y = np.array(dedx_track_x), np.array(dedx_track_y)
+    # dedx_track_x, dedx_track_y = dedx_track_x, dedx_track_y
 
     # TODO: нужен ли здесь параметр height?
     peaks_info = scipy.signal.find_peaks(dedx_track_x + dedx_track_y, height=1.0, distance=1)
@@ -287,12 +286,48 @@ def get_max_dedx_track_positions(img_x, img_y, start_x, start_y, start_angle_x, 
         ax[0].plot(np.arange(1, 23, 1), dedx_track_x)
         ax[0].set_title('X')
         ax[1].plot(np.arange(1, 23, 1), dedx_track_y)
-        ax[0].set_title('Y')
+        ax[1].set_title('Y')
         for peak in peaks_sorted:
             ax[0].plot([peak + 1, peak + 1], [0, dedx_track_x[peak]], '--r')
             ax[1].plot([peak + 1, peak + 1], [0, dedx_track_y[peak]], '--r')
 
-    return peaks_sorted[:num], np.array(dedx_track_x), np.array(dedx_track_y)
+    return peaks_sorted[:num], dedx_track_x, dedx_track_y, x_track, y_track
+
+
+def get_angular_distribution(img, int_pointX, int_pointZ, verbose=False, plot=False,
+                             remove_track_points=False, startX=None, radius=2):
+    """
+    Вычисление распределения энерговыделений относительно точки взаимодействия
+    @param startX: координата точки влёта частицы (нужна, если удаляем точки вдоль трека)
+    @param plot: Рисовать картинку относительно точки взаимодействия
+    @param remove_track_points: Удалять точки вдоль трека до точки взаимодействия
+    @param radius: Радиус вокруг трека, в котором удаляются точки
+    @param img: Картина энерговыделений
+    @param int_pointX: координата X (в номерах стрипа, индекс с 0 до 95)
+    @param int_pointZ: координата Z (в номерах плоскости, индекс с 0 до 21)
+    @param verbose: Подробный вывод
+    """
+    vprint = print if verbose else lambda *a, **k: None
+    z, x = np.where(img > 0)
+    q = img[z, x]
+    z_normed = z / K  # Масштабируем ось Z
+    int_pointZ_normed = int_pointZ / K
+
+    # Удаляем точки вдоль трека
+    if remove_track_points:
+        dist = np.array(
+            [_dist_from_line_to_point(startX, 0, int_pointX, int_pointZ_normed, x[i], z_normed[i])
+             for i in range(len(x))])
+        idx_to_retain = (dist > radius) | (z > int_pointZ)
+        x, z_normed, q = x[idx_to_retain], z_normed[idx_to_retain], q[idx_to_retain]
+
+    (polar_rhoX, polar_phiX) = cartesian2polar(x - int_pointX, z_normed - int_pointZ_normed)
+
+    if plot:
+        plt.figure()
+        plt.plot(x - int_pointX, z_normed - int_pointZ_normed, 'ok', ms=4)
+
+    return polar_rhoX, polar_phiX, q
 
 
 def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
@@ -381,7 +416,7 @@ def get_star(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y,
                                                      num=num_max_positions, radius=track_radius)[0]
     else:
         # Выбираем только ненулевые значения
-        dedx_track_x, dedx_track_y = \
+        dedx_track_x, dedx_track_y, _, _ = \
             get_track_dedx(img_x, img_y, start_x, start_y, start_angle_x, start_angle_y, radius=track_radius)
         peaks_sorted = [p for p in range(22) if dedx_track_x[p] + dedx_track_y[p] > 0]
         # print(peaks_sorted)

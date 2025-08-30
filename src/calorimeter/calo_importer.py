@@ -26,7 +26,7 @@ def import_data(fname, events=None, verbose=True):
         print('.mat file loaded')
 
     size = mat_data['U1'].shape[0]
-    data = np.zeros((size, 44, 96))
+    data = np.zeros((size, 44, 96), dtype=np.float16)
     for idx in full_keys.keys():
         pl_data = mat_data.get(full_keys[idx])
         if issparse(pl_data):
